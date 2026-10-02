@@ -1,6 +1,7 @@
 {
     "SchemaVersion": 1,
     "ModName": "Linux Native Camera Tweaks",
+    "Optional": true,
     "Tabs": [
         {
             "TabId": "camera",
