@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Builds dist/: the plugin against the Steam Runtime sniper sysroot (so it loads on any distribution) and the MCM
-# settings mod's pak. Install only with the game closed.
+# settings mod's pak, each in its own zip. Install only with the game closed.
 #   BG3LE_SNIPER_SYSROOT  sniper sysroot, as made by bg3le's tools/build-sniper.sh (default: ~/bg3mods/bg3le's)
 #   BG3TOOL               bg3tool.dll, to pack the pak
 set -euo pipefail
@@ -25,14 +25,19 @@ cp -r "$ROOT/mod/Mods" "$STAGE/"
 dotnet "$BG3TOOL" pack "$STAGE" "$DIST/LNCTSettings.pak.tmp"
 mv -f "$DIST/LNCTSettings.pak.tmp" "$DIST/LNCTSettings.pak"
 
-# One download: the plugin, its MCM settings pak and the README.
+# Two downloads, published separately: the plugin, and the optional MCM page.
 VERSION="$(grep -o '#define VERSION "[^"]*"' "$ROOT/src/main.c" | cut -d'"' -f2)"
-python3 - "$DIST" "$ROOT/README.md" "LinuxNativeCameraTweaks-$VERSION.zip" <<'PY'
-import os, sys, zipfile
-dist, readme, name = sys.argv[1:]
-with zipfile.ZipFile(os.path.join(dist, name), "w", zipfile.ZIP_DEFLATED) as z:
-    for f in ("linux_native_camera_tweaks.so", "LNCTSettings.pak"):
-        z.write(os.path.join(dist, f), f)
-    z.write(readme, "README.md")
+python3 - "$DIST" "$ROOT" "$VERSION" <<'PY'
+import os, re, sys, zipfile
+dist, root, version = sys.argv[1:]
+v = int(re.search(r'id="Version64" type="int64" value="(\d+)"',
+                  open(os.path.join(root, "mod/Mods/LNCTSettings/meta.lsx")).read()).group(1))
+pak_version = f"{v >> 55}.{(v >> 47) & 0xFF}.{(v >> 31) & 0xFFFF}.{v & 0x7FFFFFFF}"
+for name, files in ((f"LinuxNativeCameraTweaks-{version}.zip", ["linux_native_camera_tweaks.so"]),
+                    (f"LNCTSettings-{pak_version}.zip", ["LNCTSettings.pak"])):
+    with zipfile.ZipFile(os.path.join(dist, name), "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(os.path.join(dist, f), f)
+        z.write(os.path.join(root, "README.md"), "README.md")
 PY
 ls -lh "$DIST"

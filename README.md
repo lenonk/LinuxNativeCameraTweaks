@@ -56,8 +56,9 @@ From the bg3le console: `Ext.Plugins.GetSettings("LinuxNativeCameraTweaks")` lis
 ## Build
 
 Needs cmake and the SDL2 headers. `./compile.sh` builds `build/linux_native_camera_tweaks.so` against the host.
-`./package.sh` builds the release in `dist/`: the plugin against the Steam Runtime sniper sysroot from bg3le's
-`tools/build-sniper.sh`, so it loads on any distribution, and the MCM pak (with bg3tool).
+`./package.sh` builds the two releases in `dist/`, each its own zip and its own Nexus Mods page: the plugin, against
+the Steam Runtime sniper sysroot from bg3le's `tools/build-sniper.sh` so it loads on any distribution, and the MCM
+pak (packed with bg3tool).
 
 ## Credits and permissions
 
