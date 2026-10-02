@@ -1,0 +1,119 @@
+{
+    "SchemaVersion": 1,
+    "ModName": "Linux Native Camera Tweaks",
+    "Tabs": [
+        {
+            "TabId": "camera",
+            "TabName": "Camera",
+            "Sections": [
+                {
+                    "SectionId": "pitch",
+                    "SectionName": "Pitch",
+                    "SectionDescription": "Hold the camera rotate binding (middle mouse by default) and move the mouse up or down to tilt the camera.",
+                    "Settings": [
+                        {
+                            "Id": "roll_sensitivity",
+                            "Name": "Mouse sensitivity",
+                            "Type": "slider_float",
+                            "Default": 2.0,
+                            "Description": "Degrees of pitch per unit of mouse movement.",
+                            "Options": { "Min": 0.1, "Max": 10.0 }
+                        },
+                        {
+                            "Id": "invert_roll",
+                            "Name": "Invert",
+                            "Type": "checkbox",
+                            "Default": false,
+                            "Description": "Swap which way moving the mouse tilts the camera."
+                        },
+                        {
+                            "Id": "roll_min",
+                            "Name": "Lowest pitch",
+                            "Type": "slider_float",
+                            "Default": -89.0,
+                            "Description": "How far the camera can tilt one way, in degrees.",
+                            "Options": { "Min": -89.0, "Max": 89.0 }
+                        },
+                        {
+                            "Id": "roll_max",
+                            "Name": "Highest pitch",
+                            "Type": "slider_float",
+                            "Default": 89.0,
+                            "Description": "How far the camera can tilt the other way, in degrees. Must be above the lowest pitch.",
+                            "Options": { "Min": -89.0, "Max": 89.0 }
+                        }
+                    ]
+                },
+                {
+                    "SectionId": "zoom",
+                    "SectionName": "Zoom",
+                    "Settings": [
+                        {
+                            "Id": "zoom_step",
+                            "Name": "Zoom step",
+                            "Type": "slider_float",
+                            "Default": 0.25,
+                            "Description": "How far one notch of the mouse wheel zooms.",
+                            "Options": { "Min": 0.01, "Max": 5.0 }
+                        },
+                        {
+                            "Id": "invert_zoom",
+                            "Name": "Invert",
+                            "Type": "checkbox",
+                            "Default": false,
+                            "Description": "Swap which way the mouse wheel zooms."
+                        },
+                        {
+                            "Id": "zoom_limit",
+                            "Name": "Limit zoom",
+                            "Type": "checkbox",
+                            "Default": false,
+                            "Description": "Keep the zoom between the limits below. Off, the zoom is unlimited."
+                        },
+                        {
+                            "Id": "zoom_min",
+                            "Name": "Closest zoom",
+                            "Type": "slider_float",
+                            "Default": 1.0,
+                            "Description": "The closest the camera can zoom in.",
+                            "Options": { "Min": 0.0, "Max": 200.0 },
+                            "VisibleIf": { "Conditions": [ { "SettingId": "zoom_limit", "Operator": "==", "ExpectedValue": "true" } ] }
+                        },
+                        {
+                            "Id": "zoom_max",
+                            "Name": "Farthest zoom",
+                            "Type": "slider_float",
+                            "Default": 100.0,
+                            "Description": "The farthest the camera can zoom out. Must be above the closest zoom.",
+                            "Options": { "Min": 0.0, "Max": 200.0 },
+                            "VisibleIf": { "Conditions": [ { "SettingId": "zoom_limit", "Operator": "==", "ExpectedValue": "true" } ] }
+                        }
+                    ]
+                },
+                {
+                    "SectionId": "controller",
+                    "SectionName": "Controller",
+                    "SectionDescription": "The right stick tilts the camera; with the stick pressed in, it zooms.",
+                    "Settings": [
+                        {
+                            "Id": "controller_roll_speed",
+                            "Name": "Pitch speed",
+                            "Type": "slider_float",
+                            "Default": 2.0,
+                            "Description": "Degrees of pitch per frame with the stick fully over.",
+                            "Options": { "Min": 0.1, "Max": 10.0 }
+                        },
+                        {
+                            "Id": "controller_deadzone",
+                            "Name": "Dead zone",
+                            "Type": "slider_int",
+                            "Default": 4000,
+                            "Description": "How far the stick has to move before it counts, out of 32767.",
+                            "Options": { "Min": 0, "Max": 32000 }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
