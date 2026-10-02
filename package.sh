@@ -17,24 +17,24 @@ cmake -S "$ROOT" -B "$ROOT/build-sniper" -G Ninja -DCMAKE_BUILD_TYPE=Release \
 cmake --build "$ROOT/build-sniper"
 newest="$(objdump -T "$ROOT/build-sniper/linux_native_camera_tweaks.so" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
 echo "plugin needs $newest"
-cp "$ROOT/build-sniper/linux_native_camera_tweaks.so" "$DIST/"
 
+# The pak is built in build-sniper/ too; dist/ only gets the zips.
 STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 cp -r "$ROOT/mod/Mods" "$STAGE/"
-dotnet "$BG3TOOL" pack "$STAGE" "$DIST/LNCTSettings.pak.tmp"
-mv -f "$DIST/LNCTSettings.pak.tmp" "$DIST/LNCTSettings.pak"
+dotnet "$BG3TOOL" pack "$STAGE" "$ROOT/build-sniper/LNCTSettings.pak"
 
 # Two downloads, published separately: the plugin, and the optional MCM page.
 VERSION="$(grep -o '#define VERSION "[^"]*"' "$ROOT/src/main.c" | cut -d'"' -f2)"
 python3 - "$DIST" "$ROOT" "$VERSION" <<'PY'
 import os, re, sys, zipfile
 dist, root, version = sys.argv[1:]
+build = os.path.join(root, "build-sniper")
 v = int(re.search(r'id="Version64" type="int64" value="(\d+)"',
                   open(os.path.join(root, "mod/Mods/LNCTSettings/meta.lsx")).read()).group(1))
 pak_version = f"{v >> 55}.{(v >> 47) & 0xFF}.{(v >> 31) & 0xFFFF}.{v & 0x7FFFFFFF}"
-so = os.path.join(dist, "linux_native_camera_tweaks.so")
-pak = os.path.join(dist, "LNCTSettings.pak")
+so = os.path.join(build, "linux_native_camera_tweaks.so")
+pak = os.path.join(build, "LNCTSettings.pak")
 readme = os.path.join(root, "README.md")
 for name, files in ((f"LinuxNativeCameraTweaks-{version}.zip", [so, os.path.join(root, "install.py"), readme]),
                     (f"LNCTSettings-{pak_version}.zip", [pak, readme])):
