@@ -168,41 +168,36 @@ float H_CalculateCameraAngle_CallSite(void* pCameraObject, uint8_t angle)
 	return O_CalculateCameraAngle(pCameraObject, angle);
 }
 
+// Turns the game's `movss [field], xmm` store of its smoothed pitch/zoom into a load of the same field.
+// NOPing it (upstream) left the game drawing with its smoothed value, a frame-time-dependent step off ours: shake.
+static uint8_t StoreToLoad(uint8_t* movss, const char* what)
+{
+	int op = -1;
+	for (int i = 1; i < 3; i++)
+		if (movss[0] == 0xF3 && movss[i] == 0x0F && movss[i + 1] == 0x11)
+			op = i + 1;
+	if (op < 0)
+	{
+		g_host->warn(g_self, "PatchUpdateCamera(): %s isn't a movss store", what);
+		return 0;
+	}
+
+	long page_size = sysconf(_SC_PAGESIZE);
+	uint64_t page_start = (uint64_t)(movss + op) & ~(page_size - 1);
+	if (mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
+	{
+		g_host->warn(g_self, "PatchUpdateCamera(): %s mprotect() failed", what);
+		return 0;
+	}
+	movss[op] = 0x10;
+	mprotect((void*)page_start, page_size, PROT_READ | PROT_EXEC);
+	return 1;
+}
+
 uint8_t PatchUpdateCamera()
 {
-	void* movss = (void*)GetAddresses()->roll_movss;
-	long page_size = sysconf(_SC_PAGESIZE);
-	uint64_t page_start = (uint64_t)movss & ~(page_size - 1);
-	size_t num_pages = (((uint64_t)movss + 8 - page_start) + page_size - 1) / page_size;
-	if (num_pages < 1)
-		num_pages = 1;
-
-	if (mprotect((void*)page_start, num_pages * page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
-	{
-		g_host->warn(g_self, "PatchUpdateCamera(): roll movss mprotect() failed");
-		return 0;
-	}
-
-	uint8_t nop[8] = { 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90 };
-	memcpy(movss, nop, 8);
-	mprotect((void*)page_start, num_pages * page_size, PROT_READ | PROT_EXEC);
-
-	movss = (void*)GetAddresses()->zoom_movss;
-	page_start = (uint64_t)movss & ~(page_size - 1);
-	num_pages = (((uint64_t)movss + 6 - page_start) + page_size - 1) / page_size;
-	if (num_pages < 1)
-		num_pages = 1;
-
-	if (mprotect((void*)page_start, num_pages * page_size, PROT_READ | PROT_WRITE | PROT_EXEC) != 0)
-	{
-		g_host->warn(g_self, "PatchUpdateCamera(): zoom movss mprotect() failed");
-		return 0;
-	}
-
-	memcpy(movss, nop, 6);
-	mprotect((void*)page_start, num_pages * page_size, PROT_READ | PROT_EXEC);
-
-	return 1;
+	return StoreToLoad((uint8_t*)GetAddresses()->roll_movss, "roll movss")
+		&& StoreToLoad((uint8_t*)GetAddresses()->zoom_movss, "zoom movss");
 }
 
 uint8_t SetupCallSitesTrampoline()
