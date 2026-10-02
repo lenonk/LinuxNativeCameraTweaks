@@ -33,11 +33,17 @@ dist, root, version = sys.argv[1:]
 v = int(re.search(r'id="Version64" type="int64" value="(\d+)"',
                   open(os.path.join(root, "mod/Mods/LNCTSettings/meta.lsx")).read()).group(1))
 pak_version = f"{v >> 55}.{(v >> 47) & 0xFF}.{(v >> 31) & 0xFFFF}.{v & 0x7FFFFFFF}"
-for name, files in ((f"LinuxNativeCameraTweaks-{version}.zip", ["linux_native_camera_tweaks.so"]),
-                    (f"LNCTSettings-{pak_version}.zip", ["LNCTSettings.pak"])):
-    with zipfile.ZipFile(os.path.join(dist, name), "w", zipfile.ZIP_DEFLATED) as z:
-        for f in files:
-            z.write(os.path.join(dist, f), f)
-        z.write(os.path.join(root, "README.md"), "README.md")
+so = os.path.join(dist, "linux_native_camera_tweaks.so")
+pak = os.path.join(dist, "LNCTSettings.pak")
+readme = os.path.join(root, "README.md")
+for name, files in ((f"LinuxNativeCameraTweaks-{version}.zip", [so, os.path.join(root, "install.py"), readme]),
+                    (f"LNCTSettings-{pak_version}.zip", [pak, readme])):
+    with zipfile.ZipFile(os.path.join(dist, name), "w", zipfile.ZIP_DEFLATED, compresslevel=9) as z:
+        for path in files:
+            # from_file keeps the Unix mode, so unzip leaves install.py executable.
+            info = zipfile.ZipInfo.from_file(path, os.path.basename(path))
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(path, "rb") as f:
+                z.writestr(info, f.read())
 PY
 ls -lh "$DIST"

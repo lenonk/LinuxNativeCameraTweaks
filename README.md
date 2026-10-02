@@ -19,12 +19,16 @@ Mod Configuration Menu.
 
 ## Install
 
-Needs bg3le; the Mod Configuration Menu is optional, for the settings UI. With the game closed:
+Needs [bg3le](https://www.nexusmods.com/baldursgate3/mods/25431). It comes as two downloads:
 
-- `linux_native_camera_tweaks.so` goes in `~/.local/share/bg3le/plugins/`.
-- `LNCTSettings.pak`, only if you use MCM, goes in the game's `Mods` folder; enable it in the mod manager.
+- **Linux Native Camera Tweaks**, the plugin. Unzip it and run `./install.py`, which copies
+  `linux_native_camera_tweaks.so` into `~/.local/share/bg3le/plugins/` (`--uninstall` removes it, `--dry-run` shows
+  what it would do). Steam can stay open; the game picks it up at its next launch.
+- **Linux Native Camera Tweaks Settings**, optional: the MCM page, a normal pak for your mod manager. Without it the
+  settings are in a file; see [Settings](#settings).
 
-Remove the original `LD_PRELOAD` version if you have it; the two would patch the camera twice.
+Remove the original `LD_PRELOAD` version if you have it; the two would patch the camera twice. The installer warns if
+your launch options still load it.
 
 ## Settings
 
