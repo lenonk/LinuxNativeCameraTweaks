@@ -13,7 +13,7 @@
 #include "offsets.h"
 
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 #define PLUGIN_NAME "LinuxNativeCameraTweaks"
 //Tested Game build:
 	//4.1.1.7398727
