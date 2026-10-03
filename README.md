@@ -13,6 +13,11 @@ Mod Configuration Menu.
 - Loaded by bg3le from `~/.local/share/bg3le/plugins`; no launch option changes.
 - Settings: pitch sensitivity, inversion and limits; zoom step, inversion and optional limits; controller pitch
   speed and dead zone. They're set in MCM or in a settings file, and kept between launches; see [Settings](#settings).
+- Scrollable windows (inventory, an overflowing hotbar) scroll again: the game's UI gets the mouse wheel first, and
+  the camera zooms only when nothing in the UI used it. Upstream took every wheel event for the camera.
+- Smooth zoom: the camera eases to each new zoom instead of jumping.
+- No camera shake: the game drew its own smoothed pitch and zoom, a frame-time-dependent step off the mod's; it now
+  draws exactly the mod's.
 - No crash when `CameraToggleMouseRotate` was never rebound: `inputconfig_p1.json` only lists changed bindings, so
   the game's default (middle mouse) is used.
 - Works on game build 4.76.31.656.
@@ -44,6 +49,8 @@ writes it, listing every setting, the first time the plugin starts; the pak isn'
 | `roll_min`, `roll_max` | -89, 89 | -89–89 | how far the camera tilts each way |
 | `zoom_step` | 0.25 | 0.01–5 | zoom per mouse wheel notch |
 | `invert_zoom` | false | | swap which way the wheel zooms |
+| `smooth_zoom` | true | | ease the camera to each new zoom instead of jumping |
+| `zoom_smoothing` | 10 | 1–30 | how quickly it catches up; lower is smoother |
 | `zoom_limit` | false | | keep the zoom between `zoom_min` and `zoom_max` |
 | `zoom_min`, `zoom_max` | 1, 100 | 0–200 | the zoom limits, when on |
 | `controller_roll_speed` | 2.0 | 0.1–10 | degrees of pitch per frame with the right stick fully over |

@@ -3,6 +3,8 @@
 #include <dlfcn.h>
 #include <sys/types.h>
 #include <stdatomic.h>
+#include <math.h>
+#include <time.h>
 #include <SDL2/SDL.h>
 
 #include "bg3le_plugin.h"
@@ -33,6 +35,8 @@ static int g_invert_zoom = 0;
 static int g_zoom_limit = 0;
 static float g_zoom_min = 1.f;
 static float g_zoom_max = 100.f;
+static int g_smooth_zoom = 1;
+static float g_zoom_smoothing = 10.f;
 static float g_controller_roll_speed = 2.f;
 static int g_controller_deadzone = 4000;
 
@@ -43,6 +47,8 @@ static float* g_roll;
 
 static atomic_int g_mouse_delta_y;
 static atomic_int g_mouse_wheel_y;
+static atomic_int g_pending_wheel_y;
+static int g_ui_wheel = 0;
 static atomic_int g_roll_keydown = 0;
 static atomic_int g_controller_right_stick_y;
 static atomic_int g_controller_right_stick_axis_motion_y = 0;
@@ -101,14 +107,40 @@ static int Deadzoned(int value)
 	return (value > -g_controller_deadzone && value < g_controller_deadzone) ? 0 : value;
 }
 
-static void ClampZoom(void)
+static float ClampZoom(float zoom)
 {
 	if (!g_zoom_limit || g_zoom_min >= g_zoom_max)
-		return;
-	if (*g_zoom < g_zoom_min)
-		*g_zoom = g_zoom_min;
-	if (*g_zoom > g_zoom_max)
-		*g_zoom = g_zoom_max;
+		return zoom;
+	return zoom < g_zoom_min ? g_zoom_min : zoom > g_zoom_max ? g_zoom_max : zoom;
+}
+
+// The wheel moves a target; the camera eases toward it, framerate-independently.
+static float g_zoom_target;
+static float g_zoom_written;
+static void* g_zoom_camera;
+
+static void UpdateZoom(void* camera, float delta)
+{
+	static struct timespec last;
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	float dt = last.tv_sec ? (float)(now.tv_sec - last.tv_sec) + (float)(now.tv_nsec - last.tv_nsec) * 1e-9f : 0.f;
+	last = now;
+	if (dt > 0.25f)
+		dt = 0.25f;
+
+	// A new camera, or the game moved it (a cutscene, a level load): start from where it is.
+	if (camera != g_zoom_camera || *g_zoom != g_zoom_written)
+	{
+		g_zoom_camera = camera;
+		g_zoom_target = *g_zoom;
+	}
+	g_zoom_target = ClampZoom(g_zoom_target + delta);
+	if (g_smooth_zoom && g_zoom_smoothing > 0.f && fabsf(g_zoom_target - *g_zoom) > 1e-4f)
+		*g_zoom += (g_zoom_target - *g_zoom) * (1.f - expf(-g_zoom_smoothing * dt));
+	else
+		*g_zoom = g_zoom_target;
+	g_zoom_written = *g_zoom;
 }
 
 float H_CalculateCameraAngle_CallSite(void* pCameraObject, uint8_t angle)
@@ -120,16 +152,11 @@ float H_CalculateCameraAngle_CallSite(void* pCameraObject, uint8_t angle)
 	if (right_stick_button_down && right_stick_axis_motion_y)
 	{
 		int right_stick_y = Deadzoned(atomic_load(&g_controller_right_stick_y));
-		*g_zoom += -((float)right_stick_y / 32767.f * g_zoom_step) * zoom_sign;
-		ClampZoom();
+		UpdateZoom(pCameraObject, -((float)right_stick_y / 32767.f * g_zoom_step) * zoom_sign);
 		return O_CalculateCameraAngle(pCameraObject, angle);
 	}
-	else
-	{
-		int zoom = atomic_exchange(&g_mouse_wheel_y, 0);
-		*g_zoom += -((float)zoom * g_zoom_step) * zoom_sign;
-		ClampZoom();
-	}
+	int wheel = atomic_exchange(&g_mouse_wheel_y, 0);
+	UpdateZoom(pCameraObject, -((float)wheel * g_zoom_step) * zoom_sign);
 
 	int roll_keydown = atomic_load(&g_roll_keydown);
 	if (!roll_keydown && !right_stick_axis_motion_y)
@@ -285,6 +312,68 @@ static void TrackRollBinding(int is_mouse, int code, int down)
 	}
 }
 
+// Noesis gets the wheel first, so scrollable windows scroll; the camera zooms only when no UI element used it.
+typedef uint8_t (*MouseWheel_t)(void*, int, int, int);
+static MouseWheel_t O_View_MouseWheel, O_IView_MouseWheel;
+
+static void AfterUIWheel(uint8_t handled)
+{
+	int pending = atomic_exchange(&g_pending_wheel_y, 0);
+	if (!handled && pending)
+		atomic_fetch_add(&g_mouse_wheel_y, pending);
+}
+
+static uint8_t H_View_MouseWheel(void* view, int x, int y, int rotation)
+{
+	uint8_t handled = O_View_MouseWheel(view, x, y, rotation);
+	AfterUIWheel(handled);
+	return handled;
+}
+
+static uint8_t H_IView_MouseWheel(void* view, int x, int y, int rotation)
+{
+	uint8_t handled = O_IView_MouseWheel(view, x, y, rotation);
+	AfterUIWheel(handled);
+	return handled;
+}
+
+// Swaps View::MouseWheel and its IView thunk in Noesis::View's vtables.
+static int HookUIWheel(void)
+{
+	const char* names[] = { "_ZTVN6Noesis4ViewE", "_ZN6Noesis4View10MouseWheelEiii", "_ZThn16_N6Noesis4View10MouseWheelEiii" };
+	uint64_t addresses[3], sizes[3];
+	FindSymbols(names, 3, addresses, sizes);
+	if (!addresses[0] || !sizes[0] || !addresses[1] || !addresses[2])
+		return 0;
+
+	uint64_t* slots = (uint64_t*)addresses[0];
+	size_t count = sizes[0] / sizeof(uint64_t);
+	uint64_t* view_slot = NULL;
+	uint64_t* iview_slot = NULL;
+	for (size_t i = 0; i < count; i++)
+	{
+		if (slots[i] == addresses[1] && !view_slot)
+			view_slot = &slots[i];
+		else if (slots[i] == addresses[2] && !iview_slot)
+			iview_slot = &slots[i];
+	}
+	if (!view_slot || !iview_slot)
+		return 0;
+
+	long page_size = sysconf(_SC_PAGESIZE);
+	uint64_t first = (uint64_t)(view_slot < iview_slot ? view_slot : iview_slot) & ~(page_size - 1);
+	uint64_t last = (uint64_t)(view_slot < iview_slot ? iview_slot : view_slot) & ~(page_size - 1);
+	size_t len = last - first + page_size;
+	if (mprotect((void*)first, len, PROT_READ | PROT_WRITE) != 0)
+		return 0;
+	O_View_MouseWheel = (MouseWheel_t)*view_slot;
+	O_IView_MouseWheel = (MouseWheel_t)*iview_slot;
+	*view_slot = (uint64_t)H_View_MouseWheel;
+	*iview_slot = (uint64_t)H_IView_MouseWheel;
+	mprotect((void*)first, len, PROT_READ);
+	return 1;
+}
+
 // Upstream's SDL_PollEvent body; returning 1 keeps the event from the game.
 static int OnEvent(void* user, SDL_Event* event)
 {
@@ -295,7 +384,12 @@ static int OnEvent(void* user, SDL_Event* event)
 			atomic_store(&g_mouse_delta_y, event->motion.yrel);
 			return 0;
 		case SDL_MOUSEWHEEL:
-			atomic_store(&g_mouse_wheel_y, event->wheel.y);
+			if (g_ui_wheel)
+			{
+				atomic_fetch_add(&g_pending_wheel_y, event->wheel.y);
+				return 0;
+			}
+			atomic_fetch_add(&g_mouse_wheel_y, event->wheel.y);
 			return 1;
 		case SDL_MOUSEBUTTONDOWN:
 		case SDL_MOUSEBUTTONUP:
@@ -337,6 +431,8 @@ static void RegisterSettings(void)
 	g_host->add_setting(g_self, "zoom_limit", BG3LE_SETTING_BOOL, &g_zoom_limit, 0, 0);
 	g_host->add_setting(g_self, "zoom_min", BG3LE_SETTING_FLOAT, &g_zoom_min, 0.0, 200.0);
 	g_host->add_setting(g_self, "zoom_max", BG3LE_SETTING_FLOAT, &g_zoom_max, 0.0, 200.0);
+	g_host->add_setting(g_self, "smooth_zoom", BG3LE_SETTING_BOOL, &g_smooth_zoom, 0, 0);
+	g_host->add_setting(g_self, "zoom_smoothing", BG3LE_SETTING_FLOAT, &g_zoom_smoothing, 1.0, 30.0);
 	g_host->add_setting(g_self, "controller_roll_speed", BG3LE_SETTING_FLOAT, &g_controller_roll_speed, 0.1, 10.0);
 	g_host->add_setting(g_self, "controller_deadzone", BG3LE_SETTING_INT, &g_controller_deadzone, 0, 32000);
 }
@@ -386,6 +482,9 @@ int bg3le_plugin_init(const bg3le_host* host, bg3le_plugin* self)
 		return 4;
 	}
 
+	g_ui_wheel = HookUIWheel();
+	if (!g_ui_wheel)
+		host->warn(self, "couldn't hook Noesis' mouse wheel; the wheel always zooms, even over scrollable windows");
 	if (host->add_event_handler(self, OnEvent, NULL) != 0)
 		return 5;
 	if (!PatchUpdateCamera())

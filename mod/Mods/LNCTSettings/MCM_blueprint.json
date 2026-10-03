@@ -65,6 +65,22 @@
                             "Description": "Swap which way the mouse wheel zooms."
                         },
                         {
+                            "Id": "smooth_zoom",
+                            "Name": "Smooth zoom",
+                            "Type": "checkbox",
+                            "Default": true,
+                            "Description": "Ease the camera to each new zoom instead of jumping."
+                        },
+                        {
+                            "Id": "zoom_smoothing",
+                            "Name": "Smoothing speed",
+                            "Type": "slider_float",
+                            "Default": 10.0,
+                            "Description": "How quickly the camera catches up to the zoom; lower is smoother.",
+                            "Options": { "Min": 1.0, "Max": 30.0 },
+                            "VisibleIf": { "Conditions": [ { "SettingId": "smooth_zoom", "Operator": "==", "ExpectedValue": "true" } ] }
+                        },
+                        {
                             "Id": "zoom_limit",
                             "Name": "Limit zoom",
                             "Type": "checkbox",

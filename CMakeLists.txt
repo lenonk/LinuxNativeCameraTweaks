@@ -15,3 +15,4 @@ set_target_properties(${PROJECT_NAME} PROPERTIES PREFIX "")
 
 target_include_directories(${PROJECT_NAME} PRIVATE src ${SDL2_INCLUDE_DIRS})
 target_compile_definitions(${PROJECT_NAME} PRIVATE _GNU_SOURCE)
+target_link_libraries(${PROJECT_NAME} PRIVATE m)

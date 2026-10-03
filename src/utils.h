@@ -221,6 +221,44 @@ static uint64_t GetSectionAddress(const char* section, uint64_t* size_buffer)
     return result;
 }
 
+// Runtime addresses (and sizes) of the named .symtab symbols of the game's executable; 0 where missing.
+static void FindSymbols(const char** names, int count, uint64_t* addresses, uint64_t* sizes)
+{
+    memset(addresses, 0, sizeof(uint64_t) * count);
+    memset(sizes, 0, sizeof(uint64_t) * count);
+    size_t file_size = 0;
+    uint8_t* file = MapSelfExe(&file_size);
+    if (!file)
+        return;
+
+    Elf64_Ehdr* ehdr = (Elf64_Ehdr*)file;
+    Elf64_Shdr* shdrs = (Elf64_Shdr*)(file + ehdr->e_shoff);
+    uint64_t base = GetModuleBase(0);
+    for (int i = 0; i < ehdr->e_shnum; i++)
+    {
+        if (shdrs[i].sh_type != SHT_SYMTAB)
+            continue;
+        Elf64_Sym* syms = (Elf64_Sym*)(file + shdrs[i].sh_offset);
+        const char* strtab = (const char*)(file + shdrs[shdrs[i].sh_link].sh_offset);
+        size_t n = shdrs[i].sh_size / sizeof(Elf64_Sym);
+        for (size_t s = 0; s < n; s++)
+        {
+            if (!syms[s].st_value)
+                continue;
+            const char* name = strtab + syms[s].st_name;
+            for (int k = 0; k < count; k++)
+            {
+                if (!addresses[k] && strcmp(name, names[k]) == 0)
+                {
+                    addresses[k] = base + syms[s].st_value;
+                    sizes[k] = syms[s].st_size;
+                }
+            }
+        }
+    }
+    munmap(file, file_size);
+}
+
 static uint64_t PatternScanSection(const char* ida_pattern, const char* section)
 {
     Pattern pattern;

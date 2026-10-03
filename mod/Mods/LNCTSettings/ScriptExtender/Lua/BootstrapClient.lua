@@ -2,7 +2,7 @@
 local PLUGIN = "LinuxNativeCameraTweaks"
 local SETTINGS = {
     "roll_sensitivity", "invert_roll", "roll_min", "roll_max",
-    "zoom_step", "invert_zoom", "zoom_limit", "zoom_min", "zoom_max",
+    "zoom_step", "invert_zoom", "smooth_zoom", "zoom_smoothing", "zoom_limit", "zoom_min", "zoom_max",
     "controller_roll_speed", "controller_deadzone",
 }
 
