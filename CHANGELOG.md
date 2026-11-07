@@ -2,6 +2,12 @@
 
 ## Linux Native Camera Tweaks - bg3le Plugin
 
+### 1.2 (2026-11-07)
+
+- The camera tilts on other characters' turns too. Before, only yaw worked there.
+- The cursor no longer stays hidden after a turn change or a dialog interrupts a camera tilt. It used to stay hidden,
+  though still clickable, until your next turn.
+
 ### 1.1 (2026-10-02)
 
 - Scrollable windows (the inventory, an overflowing hotbar) scroll again. The game's UI gets the mouse wheel first,

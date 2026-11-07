@@ -20,6 +20,9 @@ Mod Configuration Menu.
   draws exactly the mod's.
 - No crash when `CameraToggleMouseRotate` was never rebound: `inputconfig_p1.json` only lists changed bindings, so
   the game's default (middle mouse) is used.
+- Tilting works on every turn, not only your own, and a turn change or dialog in the middle of a tilt no longer
+  leaves the cursor hidden. Upstream applied the tilt at a point the game only reaches on the player's turn, and
+  showed the cursor again only from there.
 - Works on game build 4.76.31.656.
 
 ## Install

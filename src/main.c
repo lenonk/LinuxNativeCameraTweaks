@@ -13,7 +13,7 @@
 #include "offsets.h"
 
 
-#define VERSION "1.1"
+#define VERSION "1.2"
 #define PLUGIN_NAME "LinuxNativeCameraTweaks"
 //Tested Game build:
 	//4.1.1.7398727
@@ -60,11 +60,12 @@ static const ActionBindings* g_binds[1];
 static const ActionBindings g_default_rotate =
 	{ "CameraToggleMouseRotate", { { BINDING_MOUSE, SDL_SCANCODE_UNKNOWN, SDL_BUTTON_MIDDLE, "middle" } }, 1 };
 
-static SDL_bool (*O_SDL_GetRelativeMouseMode)(void) = NULL;
 static int (*O_SDL_SetRelativeMouseMode)(SDL_bool) = NULL;
+static int g_relative;
+static atomic_llong g_camera_updated_ms;
 
-typedef float (*CalculateCameraAngle_t)(void*, uint8_t);
-static CalculateCameraAngle_t O_CalculateCameraAngle;
+typedef uint64_t (*UpdateCamera_t)(void*, void*, void*, void**);
+static UpdateCamera_t O_UpdateCamera;
 
 typedef uint8_t undefined8[8];
 typedef void (*SaveToInputConfigFile_4117209685_t)(undefined8, undefined8, undefined8, undefined8, undefined8, undefined8,
@@ -143,32 +144,25 @@ static void UpdateZoom(void* camera, float delta)
 	g_zoom_written = *g_zoom;
 }
 
-float H_CalculateCameraAngle_CallSite(void* pCameraObject, uint8_t angle)
+static void ApplyCameraInput(void* camera)
 {
-	g_zoom = (float*)((uint8_t*)pCameraObject + 0x58);
+	g_zoom = (float*)((uint8_t*)camera + 0x58);
 	const float zoom_sign = g_invert_zoom ? -1.f : 1.f;
 	int right_stick_button_down = atomic_load(&g_controller_right_stick_button_down);
 	int right_stick_axis_motion_y = atomic_load(&g_controller_right_stick_axis_motion_y);
 	if (right_stick_button_down && right_stick_axis_motion_y)
 	{
 		int right_stick_y = Deadzoned(atomic_load(&g_controller_right_stick_y));
-		UpdateZoom(pCameraObject, -((float)right_stick_y / 32767.f * g_zoom_step) * zoom_sign);
-		return O_CalculateCameraAngle(pCameraObject, angle);
+		UpdateZoom(camera, -((float)right_stick_y / 32767.f * g_zoom_step) * zoom_sign);
+		return;
 	}
 	int wheel = atomic_exchange(&g_mouse_wheel_y, 0);
-	UpdateZoom(pCameraObject, -((float)wheel * g_zoom_step) * zoom_sign);
+	UpdateZoom(camera, -((float)wheel * g_zoom_step) * zoom_sign);
 
-	int roll_keydown = atomic_load(&g_roll_keydown);
-	if (!roll_keydown && !right_stick_axis_motion_y)
-	{
-		if (O_SDL_GetRelativeMouseMode() == SDL_TRUE)
-			O_SDL_SetRelativeMouseMode(SDL_FALSE);
-		return O_CalculateCameraAngle(pCameraObject, angle);
-	}
-	if (O_SDL_GetRelativeMouseMode() != SDL_TRUE)
-		O_SDL_SetRelativeMouseMode(SDL_TRUE);
+	if (!atomic_load(&g_roll_keydown) && !right_stick_axis_motion_y)
+		return;
 
-	g_roll = (float*)((uint8_t*)pCameraObject + 0x164);
+	g_roll = (float*)((uint8_t*)camera + 0x164);
 	float roll = *g_roll;
 	const float roll_sign = g_invert_roll ? -1.f : 1.f;
 
@@ -191,8 +185,35 @@ float H_CalculateCameraAngle_CallSite(void* pCameraObject, uint8_t angle)
 	if (roll < lo)
 		roll = lo;
 	*g_roll = roll;
+}
 
-	return O_CalculateCameraAngle(pCameraObject, angle);
+static long long NowMs(void)
+{
+	struct timespec now;
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (long long)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+// The game's per-frame camera update. Upstream hooked an angle call in it that only the collision check makes,
+// which is skipped on other characters' turns: the pitch froze there.
+static uint64_t H_UpdateCamera_CallSite(void* p1, void* p2, void* p3, void** camera)
+{
+	if (*camera)
+		ApplyCameraInput(*camera);
+	atomic_store(&g_camera_updated_ms, NowMs());
+	return O_UpdateCamera(p1, p2, p3, camera);
+}
+
+// Tilting hides the cursor (relative mode). Set only here, on the main thread, and only while the camera updates,
+// so a dialog or a turn change in the middle can't leave the cursor hidden.
+static void SyncRelativeMouse(void)
+{
+	int want = (atomic_load(&g_roll_keydown) || atomic_load(&g_controller_right_stick_axis_motion_y))
+		&& NowMs() - atomic_load(&g_camera_updated_ms) < 500;
+	if (want == g_relative)
+		return;
+	O_SDL_SetRelativeMouseMode(want ? SDL_TRUE : SDL_FALSE);
+	g_relative = want;
 }
 
 // Turns the game's `movss [field], xmm` store of its smoothed pitch/zoom into a load of the same field.
@@ -231,17 +252,17 @@ uint8_t SetupCallSitesTrampoline()
 {
 	size_t page_size = sysconf(_SC_PAGESIZE);
 
-	void* callsite = (void*)GetAddresses()->CalculateCameraAngle_CallSite;
+	void* callsite = (void*)GetAddresses()->UpdateCamera_CallSite;
 	void* trampoline = AllocNear(callsite, page_size);
 	if (!trampoline)
 	{
-		g_host->warn(g_self, "SetupCallSitesTrampoline(): AllocNear() failed for CalculateCameraAngle()");
+		g_host->warn(g_self, "SetupCallSitesTrampoline(): AllocNear() failed for UpdateCamera()");
 		return 0;
 	}
 
-	if (!PatchCallSite(callsite, trampoline, H_CalculateCameraAngle_CallSite))
+	if (!PatchCallSite(callsite, trampoline, H_UpdateCamera_CallSite))
 	{
-		g_host->warn(g_self, "SetupCallSitesTrampoline(): PatchCallSite() failed for CalculateCameraAngle()");
+		g_host->warn(g_self, "SetupCallSitesTrampoline(): PatchCallSite() failed for UpdateCamera()");
 		munmap(trampoline, page_size);
 		return 0;
 	}
@@ -375,9 +396,8 @@ static int HookUIWheel(void)
 }
 
 // Upstream's SDL_PollEvent body; returning 1 keeps the event from the game.
-static int OnEvent(void* user, SDL_Event* event)
+static int HandleEvent(SDL_Event* event)
 {
-	(void)user;
 	switch (event->type)
 	{
 		case SDL_MOUSEMOTION:
@@ -415,9 +435,22 @@ static int OnEvent(void* user, SDL_Event* event)
 			if (event->cbutton.button == SDL_CONTROLLER_BUTTON_RIGHTSTICK)
 				atomic_store(&g_controller_right_stick_button_down, event->type == SDL_CONTROLLERBUTTONDOWN);
 			return 0;
+		case SDL_WINDOWEVENT:
+			// The release would go to the window that has focus now.
+			if (event->window.event == SDL_WINDOWEVENT_FOCUS_LOST)
+				atomic_store(&g_roll_keydown, 0);
+			return 0;
 		default:
 			return 0;
 	}
+}
+
+static int OnEvent(void* user, SDL_Event* event)
+{
+	(void)user;
+	int consumed = HandleEvent(event);
+	SyncRelativeMouse();
+	return consumed;
 }
 
 static void RegisterSettings(void)
@@ -446,9 +479,8 @@ int bg3le_plugin_init(const bg3le_host* host, bg3le_plugin* self)
 	host->describe(self, PLUGIN_NAME, VERSION);
 	host->log(self, "Linux Native Camera Tweaks %s, by Biiinks78", VERSION);
 
-	O_SDL_GetRelativeMouseMode = (SDL_bool (*)(void))host->sdl_function("SDL_GetRelativeMouseMode");
 	O_SDL_SetRelativeMouseMode = (int (*)(SDL_bool))host->sdl_function("SDL_SetRelativeMouseMode");
-	if (!O_SDL_GetRelativeMouseMode || !O_SDL_SetRelativeMouseMode)
+	if (!O_SDL_SetRelativeMouseMode)
 	{
 		host->warn(self, "SDL's relative mouse functions aren't available");
 		return 2;
@@ -461,25 +493,33 @@ int bg3le_plugin_init(const bg3le_host* host, bg3le_plugin* self)
 	struct Sigs* sigs = GetSigs();
 	struct Addresses* addresses = GetAddresses();
 	addresses->CalculateCameraAngle_CallSite = PatternScanSection(sigs->CalculateCameraAngle_Callsite, ".text") + 39;
+	addresses->UpdateCamera_CallSite = PatternScanSection(sigs->UpdateCamera_CallSite, ".text") + 18;
 	addresses->SaveToInputConfigFile_CallSite = PatternScanSection(sigs->SaveToInputConfigFile_CallSite, ".text");
 	addresses->roll_movss = PatternScanSection(sigs->roll_movss, ".text");
 	addresses->zoom_movss = PatternScanSection(sigs->zoom_movss, ".text");
-	if (addresses->CalculateCameraAngle_CallSite == 39 || !addresses->SaveToInputConfigFile_CallSite
-			|| !addresses->roll_movss || !addresses->zoom_movss)
+	if (addresses->CalculateCameraAngle_CallSite == 39 || addresses->UpdateCamera_CallSite == 18
+			|| !addresses->SaveToInputConfigFile_CallSite || !addresses->roll_movss || !addresses->zoom_movss)
 	{
 		host->warn(self, "pattern scan failed; a game update broke the patterns");
 		return 3;
 	}
 
-	O_CalculateCameraAngle = ResolveCallTarget((void*)addresses->CalculateCameraAngle_CallSite);
+	O_UpdateCamera = ResolveCallTarget((void*)addresses->UpdateCamera_CallSite);
 	if (g_game_build == 4117209685)
 		O_SaveToInputConfigFile_4117209685 = ResolveCallTarget((void*)addresses->SaveToInputConfigFile_CallSite);
 	else
 		O_SaveToInputConfigFile_4117398727 = ResolveCallTarget((void*)addresses->SaveToInputConfigFile_CallSite);
-	if (!O_CalculateCameraAngle || !(O_SaveToInputConfigFile_4117209685 || O_SaveToInputConfigFile_4117398727))
+	if (!O_UpdateCamera || !(O_SaveToInputConfigFile_4117209685 || O_SaveToInputConfigFile_4117398727))
 	{
 		host->warn(self, "a patched call site isn't a call");
 		return 4;
+	}
+	// The angle call is inside the camera update; anything else means the update pattern matched the wrong call.
+	uint64_t update = (uint64_t)O_UpdateCamera;
+	if (addresses->CalculateCameraAngle_CallSite <= update || addresses->CalculateCameraAngle_CallSite - update > 0x10000)
+	{
+		host->warn(self, "the camera update pattern found the wrong call; a game update broke the patterns");
+		return 3;
 	}
 
 	g_ui_wheel = HookUIWheel();
